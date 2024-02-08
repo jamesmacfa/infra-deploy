@@ -1,0 +1,6 @@
+flask
+flask_sqlalchemy
+PyMySQL
+psycopg2-binary
+redis
+Flask-HTTPAuth
