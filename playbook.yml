@@ -1,0 +1,108 @@
+---
+- name: Configure EC2 instances for app deployment
+  hosts: phrase #The IP addresses are provided as a terraform output
+  become: yes
+  serial: 1 # One node at a time
+  vars:
+    database_uri: "<postgres_connection_string>"
+    redis_host: "<redis_connection_string>"
+    redis_port: "6379"
+
+  tasks:
+    - name: Export environment variables for the session
+      lineinfile:
+        path: /etc/environment
+        line: "{{ item.key }}={{ item.value }}"
+        create: yes
+      loop:
+        - { key: "DATABASE_URI", value: "<postgres_connection_string>" }
+        - { key: "REDIS_HOST", value: "<redis_connection_string>" }
+
+    - name: Install Docker
+      apt:
+        name: docker.io
+        state: present
+        update_cache: yes
+
+
+    - name: Ensure Docker is running
+      service:
+        name: docker
+        state: started
+        enabled: yes
+    
+    - name: Check if Docker container exists and is running
+      docker_container_info:
+        name: phrase-app
+      register: container_info
+      ignore_errors: yes
+
+    - name: Ensure preparation for deploy starts
+      uri:
+        url: "http://localhost:5000/prepare-for-deploy"
+        method: GET
+        status_code: [200, 404] 
+        return_content: yes
+      register: prepare_deploy_response
+      until: prepare_deploy_response.status == 200
+      retries: 10
+      delay: 5
+      when: container_info.exists and container_info.container.State.Running
+
+    - name: Wait for /ready-for-deploy to return "Ready"
+      uri:
+        url: "http://localhost:5000/ready-for-deploy"
+        method: GET
+        return_content: yes
+        status_code: 200 
+      register: ready_for_deploy_response
+      until: ready_for_deploy_response.status == 200
+      retries: 20
+      delay: 5
+      when: container_info.exists and container_info.container.State.Running
+
+    - name: Stop and remove the existing Docker container if ready for deploy
+      docker_container:
+        name: phrase-app
+        state: absent
+      when: container_info.exists and container_info.container.State.Running
+
+
+    - name: Copy application files to remote host
+      copy:
+        src: application/
+        dest: /remote/app_directory/
+        mode: 0755
+    
+    - name: Build Docker container from Dockerfile
+      docker_image:
+        source: build
+        build:
+          path: /remote/app_directory/
+        name: phrase-app
+        tag: latest
+        state: present
+
+    - name: Run the Docker container with environment variables
+      docker_container:
+        name: phrase-app
+        image: phrase-app:latest
+        state: started
+        restart_policy: always
+        published_ports:
+          - "5000:5000"
+        env:
+          DATABASE_URI: "{{ database_uri }}"
+          REDIS_HOST: "{{ redis_host }}"
+    
+    - name: Wait for application to be ready
+      uri:
+        url: http://localhost:5000/status
+        method: GET
+        status_code: 200
+        timeout: 30
+      register: container_status
+      retries: 10
+      delay: 10
+      until: container_status.status == 200
+

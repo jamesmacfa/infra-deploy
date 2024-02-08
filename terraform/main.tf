@@ -167,13 +167,14 @@ resource "aws_lb" "main" {
 # Target Group for the Application Load Balancer
 resource "aws_lb_target_group" "main" {
   name     = "main-tg"
-  port     = 80
+  port     = 5000
   protocol = "HTTP"
   vpc_id   = aws_vpc.main.id
 
   health_check {
     path                = "/"
     protocol            = "HTTP"
+    port                = "5000"
     healthy_threshold   = 3
     unhealthy_threshold = 3
     timeout             = 5
@@ -277,7 +278,7 @@ resource "aws_lb_target_group_attachment" "app" {
 
   target_group_arn = aws_lb_target_group.main.arn
   target_id        = aws_instance.app[count.index].id
-  port             = 80 # Ensure this matches the port your application listens on
+  port             = 5000 # Ensure this matches the port your application listens on
 }
 
 # RDS PostgreSQL Database
@@ -334,7 +335,7 @@ resource "aws_security_group" "elasticache_sg" {
 
 resource "aws_key_pair" "deployer_key" {
   key_name   = "deployer-key"
-  public_key = "<your_public_key_goes_here"
+  public_key = "<public_key>"
 }
 
 resource "aws_route_table" "public" {
@@ -350,14 +351,13 @@ resource "aws_route_table" "public" {
   }
 }
 
-# Associate the route table with your subnet
 resource "aws_route_table_association" "public" {
   subnet_id      = aws_subnet.main.id
   route_table_id = aws_route_table.public.id
 }
 
 resource "aws_ecr_repository" "phrase_repository" {
-  name                 = "phrase-repository" # Name your repository
+  name                 = "phrase-repository"
   image_tag_mutability = "MUTABLE"
   
   image_scanning_configuration {
@@ -369,6 +369,7 @@ resource "aws_ecr_repository" "phrase_repository" {
   }
 }
 
+#The ECR repo is not used in this project, but I include it as it would be used in an ideal scenario
 output "ecr_repository_url" {
   value = aws_ecr_repository.phrase_repository.repository_url
 }
@@ -383,7 +384,7 @@ output "redis_endpoint" {
   value       = aws_elasticache_cluster.main_cache.cache_nodes[0].address
 }
 
+#Output for EC2 IPs for Ansible inventory file
 output "ec2_instance_ips" {
   value = aws_instance.app[*].public_ip
 }
-
